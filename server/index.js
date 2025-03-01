@@ -15,7 +15,10 @@ const io=new Server(httpServer,{
     }
 })
 io.on("connection",(socket)=>{
-    console.log("new socket connected",socket)
+    console.log("new socket connected",socket.id)
+    socket.on("disconnect",()=>{
+        console.log("socket disconnected with the id ",socket.id)
+    })
 })
 const port=process.env.PORT
 httpServer.listen(port,()=>{
