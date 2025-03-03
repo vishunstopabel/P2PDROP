@@ -1,11 +1,29 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.jsx'
 import {SocketProvider}  from './contexts/SocketContext';
-createRoot(document.getElementById('root')).render(
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  RouterProvider,
+  Route,
+} from "react-router-dom";
+import App from './App';
+import Resive from './Resive';
+const router=createBrowserRouter(createRoutesFromElements(
+  <>
+<Route path='/' element={<App/>}/> 
+  <Route path='resive/:id' element={<Resive/>}/>
 
-    <SocketProvider >
+  </>
+  
+))
+createRoot(document.getElementById('root')).render(
+  <SocketProvider >
+    <RouterProvider router={router} >
+   
       <App />
+ 
+    </RouterProvider>
     </SocketProvider >
 )
