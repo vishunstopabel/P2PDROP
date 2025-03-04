@@ -1,27 +1,81 @@
 const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../config/redisConfig');
 const bcrypt = require('bcrypt');
-module.exports.handleCreateConnection=async(req,res)=>{
-     try {
-        const {password}=req.body;
-        if(!password){
-            return res.status(402).json({msg:"the password is required"});
+const { getIO } = require('../sockets/socket');
+const crypto = require('crypto');
+const client = getClient();
+module.exports.handleCreateConnection = async (req, res) => {
+    try {
+        const { password, socketId } = req.body;
+        if (!password || !socketId) {
+            return res.status(400).json({ msg: "All fields are required" });
         }
-        const connectionId=uuidv4();
-        const client=getClient()
-        const saltRounds = 10;
-        let hashedpassword=''
-        bcrypt.hash(password, saltRounds, function(err, hash) {
-            if(err){
-                throw new Error("error in hashing the password");
-                
+        const connectionId = uuidv4();
+        const token = crypto.randomBytes(16).toString('hex');
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const connectionData = {
+            hashedPassword,
+            token,
+            socketId
+        };
+        await client.set(`p2pDrop:connections:${connectionId}`, JSON.stringify(connectionData), {
+            EX: 7200 
+        });
+        const connectionUri = `${process.env.FRONTEND_URI}/resive/${connectionId}`;
+        const qrUrl = `${connectionUri}?token=${token}`;
+        res.status(200).json({
+            msg: "Connection link generated successfully",
+            url: connectionUri,
+            qrUrl
+        });
+    } catch (error) {
+        console.error("Error in handleCreateConnection:", error);
+        res.status(500).json({ msg: "Internal server error" });
+    }
+};
+
+module.exports.conformConnection = async (req, res) => {
+    try {
+        const { connectionId, method, data } = req.body;
+
+        if (!method || !connectionId || !data) {
+            return res.status(400).json({ msg: "All fields are required" });
+        }
+
+        const connectionRawData = await client.get(`p2pDrop:connections:${connectionId}`);
+        if (!connectionRawData) {
+            return res.status(400).json({ msg: "Connection ID may be expired or invalid" });
+        }
+
+        const connectionData = JSON.parse(connectionRawData);
+
+        if (method === "viaPassword") {
+            const isValid = await bcrypt.compare(data.password, connectionData.hashedPassword);
+            if (!isValid) {
+                return res.status(400).json({ msg: "Invalid password" });
             }
-            hashedpassword=hash
+        } else {
+            if (data.token !== connectionData.token) {
+                return res.status(400).json({
+                    msg: "Invalid token",
+                    data: {
+                        method: "viaPassword",
+                        msg: "Switching to password auth"
+                    }
+                });
+            }
+        }
+
+        const io = getIO();
+        io.to(connectionData.socketId).emit("ready-for-receiving", data.receiverSocketId);
+
+        res.status(200).json({
+            msg: "Connection successful",
+            senderSocetId:connectionData.socketId
         });
 
-        client.set(`p2pDrop:connections:${connectionId}`,hashedpassword);
-
-     } catch (error) {
-        
-     }       
-}
+    } catch (error) {
+        console.error("Error in conformConnection:", error);
+        res.status(500).json({ msg: "Internal server error" });
+    }
+};

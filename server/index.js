@@ -17,6 +17,7 @@ const connectionRoute=require("./routes/connnection")
 app.use("/connection",connectionRoute)
 io.on("connection",(socket)=>{
     console.log("new socket connected",socket.id)
+    socket.emit("yourSocketId",socket.id)
     socket.on("disconnect",()=>{
         console.log("socket disconnected with the id ",socket.id)
     })
