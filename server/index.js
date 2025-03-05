@@ -1,28 +1,51 @@
-const {config}=require("dotenv")
-config()
-const express=require("express")
-const app=express()
-const { createServer } = require("http");
-const cors=require("cors")
-const { initSocket, getIO } = require("./sockets/socket")
-const {initRedis }=require("./config/redisConfig")
+const { config } = require('dotenv');
+config();
+
+const express = require('express');
+const { createServer } = require('http');
+const cors = require('cors');
+
+const { initSocket, getIO } = require('./sockets/socket');
+const { initRedis } = require('./config/redisConfig');
+const connectionRoute = require('./routes/connnection');
+
+const app = express();
+
+// app.use(cors({
+//     origin: process.env.FRONTEND_URI || "*"
+// }));
 app.use(cors({
     origin:"*"
 }))
-const httpServer=createServer(app)
-initSocket(httpServer)
-initRedis()
-const io=getIO()
-const connectionRoute=require("./routes/connnection")
-app.use("/connection",connectionRoute)
-io.on("connection",(socket)=>{
-    console.log("new socket connected",socket.id)
-    socket.emit("yourSocketId",socket.id)
-    socket.on("disconnect",()=>{
-        console.log("socket disconnected with the id ",socket.id)
-    })
-})
-const port=process.env.PORT
-httpServer.listen(port,()=>{
-    console.log(`app is listening at the http://localhost:${port}`)
-})
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+const httpServer = createServer(app);
+
+async function startServer() {
+    await initRedis();
+    initSocket(httpServer);
+
+    const io = getIO();
+
+    io.on("connection", (socket) => {
+        console.log("New socket connected:", socket.id);
+        socket.emit("yourSocketId", socket.id);
+
+        socket.on("disconnect", () => {
+            console.log("Socket disconnected:", socket.id);
+        });
+    });
+
+    app.use("/connection", connectionRoute);
+
+    const port = process.env.PORT || 3000;
+    httpServer.listen(port, () => {
+        console.log(`App is listening at http://localhost:${port}`);
+    });
+}
+
+startServer().catch(err => {
+    console.error("Failed to start server:", err);
+});

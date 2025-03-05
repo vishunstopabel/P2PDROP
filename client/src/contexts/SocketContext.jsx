@@ -4,12 +4,16 @@ const SocketContext =createContext();
 
 export const useSocket=()=>useContext(SocketContext);
 
+
 export const SocketProvider=({children})=>{ 
         const [socket,setSocket]=useState(null);
         useEffect(()=>{
             const newSocket=io(`http://localhost:3000`)
             setSocket(newSocket)
-            return()=>socket.disconnect()
+            return()=>{if (newSocket) {
+                newSocket.disconnect();
+            }
+        };
         },[])
         return(
             

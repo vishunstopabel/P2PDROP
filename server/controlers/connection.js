@@ -21,7 +21,7 @@ module.exports.handleCreateConnection = async (req, res) => {
         await client.set(`p2pDrop:connections:${connectionId}`, JSON.stringify(connectionData), {
             EX: 7200 
         });
-        const connectionUri = `${process.env.FRONTEND_URI}/resive/${connectionId}`;
+        const connectionUri = `${process.env.FRONTEND_URI}/recive/${connectionId}`;
         const qrUrl = `${connectionUri}?token=${token}`;
         res.status(200).json({
             msg: "Connection link generated successfully",
@@ -55,7 +55,8 @@ module.exports.conformConnection = async (req, res) => {
                 return res.status(400).json({ msg: "Invalid password" });
             }
         } else {
-            if (data.token !== connectionData.token) {
+            console.log(data.token)
+            if (data.token != connectionData.token) {
                 return res.status(400).json({
                     msg: "Invalid token",
                     data: {
