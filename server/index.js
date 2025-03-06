@@ -32,7 +32,19 @@ async function startServer() {
     io.on("connection", (socket) => {
         console.log("New socket connected:", socket.id);
         socket.emit("yourSocketId", socket.id);
-
+        socket.on("reloadvia-reciver",({receiverSocketId,senderSocketId})=>{
+            socket.to(senderSocketId).emit("pagereload-viareciver",({receiverSocketId}))
+        })
+        socket.on("ice-candidate", ({ candidate, to }) => {
+            socket.to(to).emit("ice-candidate", { candidate, socketId: socket.id });
+        });
+        
+        socket.on("offer",({to,offer})=>{
+                socket.to(to).emit("offer",{offer})
+        })
+        socket.on("answer",({mySocketId,to,answer})=>{
+            socket.to(to).emit("answer",{answer,receiverSocketId:mySocketId})
+        })
         socket.on("disconnect", () => {
             console.log("Socket disconnected:", socket.id);
         });

@@ -11,11 +11,13 @@ import {
 import App from './App';
 import Resive from './Resive';
 import { Toaster } from 'react-hot-toast';
+import ConnectionExpired from './componets/ConnectionExpired';
 const router = createBrowserRouter(
   createRoutesFromElements(
     <>
       <Route path='/' element={<App />} />
       <Route path='recive/:connectionId' element={<Resive />} />
+      <Route path='connectionexpired' element={<ConnectionExpired />} />
     </>
   )
 );

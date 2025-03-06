@@ -37,7 +37,7 @@ module.exports.handleCreateConnection = async (req, res) => {
 module.exports.conformConnection = async (req, res) => {
     try {
         const { connectionId, method, data } = req.body;
-
+        const io = getIO();
         if (!method || !connectionId || !data) {
             return res.status(400).json({ msg: "All fields are required" });
         }
@@ -47,8 +47,13 @@ module.exports.conformConnection = async (req, res) => {
             return res.status(400).json({ msg: "Connection ID may be expired or invalid" });
         }
 
-        const connectionData = JSON.parse(connectionRawData);
 
+        const connectionData = JSON.parse(connectionRawData);
+        
+        if (!io.sockets.sockets.has(connectionData.socketId)) {
+            return res.status(400).json({ msg: "Connection ID may be expired or invalid" });
+        }
+        
         if (method === "viaPassword") {
             const isValid = await bcrypt.compare(data.password, connectionData.hashedPassword);
             if (!isValid) {
@@ -67,12 +72,13 @@ module.exports.conformConnection = async (req, res) => {
             }
         }
 
-        const io = getIO();
-        io.to(connectionData.socketId).emit("ready-for-receiving", data.receiverSocketId);
+ 
+
+        io.to(connectionData.socketId).emit("ready-for-receiving",{receiverSocketId:data.receiverSocketId,hostName:req.headers.host});
 
         res.status(200).json({
             msg: "Connection successful",
-            senderSocetId:connectionData.socketId
+            senderSocketId:connectionData.socketId
         });
 
     } catch (error) {

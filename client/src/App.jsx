@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import Logo from './componets/logo'
 import { FaFileImport } from 'react-icons/fa'
 import { useDropzone } from 'react-dropzone'
@@ -6,44 +6,112 @@ import axios from 'axios'
 import { useSocket } from './contexts/SocketContext'
 import toast from 'react-hot-toast'
 import QRCode from "react-qr-code"
-
+const peers = {};
 function App() {
     const [file, setFile] = useState(null)
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isPassword, setIsPassword] = useState(true)
     const [mySocketId, setMySocketId] = useState(null)
-    const [respone, setRespone] = useState(null)
-
-    const onDrop = useCallback((acceptedFiles) => {
-        setFile(acceptedFiles[0])
-    }, [])
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, multiple: false })
-
+    const [response, setResponse] = useState(null)
+    const [connectedDevices, setConnectedDevices] = useState([])
+    const fileRef = useRef(null)
     const socket = useSocket()
+const onDrop = useCallback((acceptedFiles) => {
+    if (acceptedFiles.length > 0) {
+        setFile(acceptedFiles[0]);
+    }
+}, []);
 
+useEffect(() => {
+    if (file) {
+        console.log("Updated file:", file);
+    }
+}, [file]);
+useEffect(() => {
+    fileRef.current = file
+}, [file])
+
+
+
+
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, multiple: false })
     useEffect(() => {
         if (!socket) return
+
         socket.on("yourSocketId", (socketId) => setMySocketId(socketId))
-        return () => socket.off("yourSocketId")
-    }, [socket])
-    useEffect(()=>{
-        if (!socket) return
-        socket.on("ready-for-receiving",(socketId)=>{
-            console.log("you are ready to send data to this MF")
-            toast.success("you are ready to send data to this MF")
+
+        socket.on("ready-for-receiving", ({ receiverSocketId, hostName }) => {
+            if (!fileRef.current) {
+                toast.error("File not selected. Please choose a file before sending.")
+                return
+            }
+            const newDevice = {
+                receiverSocketId,
+                hostName,
+                status: "Ready"
+            }
+            setConnectedDevices((prev) => [...prev, newDevice])
+            toast.success(`Ready to send data to ${hostName}`)
+            sendFile(receiverSocketId)
         })
-    },[socket])
+
+        socket.on("pagereload-viareciver", ({ receiverSocketId }) => {
+            if (peers[receiverSocketId]) {
+                peers[receiverSocketId].close()
+                delete peers[receiverSocketId]
+            }
+            setConnectedDevices((prevDevices) =>
+                prevDevices.map((device) =>
+                    device.receiverSocketId === receiverSocketId
+                        ? { ...device, status: 'closed' }
+                        : device
+                )
+            )
+        })
+
+        socket.on("answer", ({ answer, receiverSocketId }) => {
+            console.log("recived answer")
+            const peer = peers[receiverSocketId]
+            if (peer) {
+                peer.setRemoteDescription(new RTCSessionDescription(answer))
+            }
+        })
+
+        socket.on("ice-candidate", ({ candidate, socketId }) => {
+            console.log("ice - recived through reciver")
+            const peer = peers[socketId]
+            if (peer) {
+                peer.addIceCandidate(new RTCIceCandidate(candidate))
+            }
+        })
+        socket.on("reloadvia-reciver", ({ receiverSocketId, senderSocketId }) => {
+            if (peers[receiverSocketId]) {
+                peers[receiverSocketId].close();
+                delete peers[receiverSocketId];
+            }
+            socket.to(senderSocketId).emit("receiver-reconnected", { receiverSocketId });
+        });
+
+        return () => {
+            socket.off("yourSocketId")
+            socket.off("ready-for-receiving")
+            socket.off("pagereload-viareciver")
+            socket.off("answer")
+            socket.off("ice-candidate")
+            socket.off("reloadvia-reciver")
+        }
+    }, [socket])
+
     const establishConnection = async () => {
         if (!mySocketId) return toast.error("Socket not ready yet, please wait!")
+        if(!file)return toast.error("slect the file to get stated")
         setIsLoading(true)
         try {
-            const res = await axios.post("http://localhost:3000/connection/createConnection", { password, socketId: mySocketId },{
-                headers:{
-                    "Content-Type":"application/json"
-                }
+            const res = await axios.post("http://localhost:3000/connection/createConnection", { password, socketId: mySocketId }, {
+                headers: { "Content-Type": "application/json" }
             })
-            setRespone(res.data)
+            setResponse(res.data)
             setIsPassword(false)
             toast.success(res.data.msg)
         } catch (err) {
@@ -55,13 +123,98 @@ function App() {
 
     const handleClickCopy = async () => {
         try {
-            await navigator.clipboard.writeText(respone.url)
+            await navigator.clipboard.writeText(response.url)
             toast.success("URL copied!")
         } catch {
             toast.error("Failed to copy URL")
         }
     }
 
+    // const createPeer = (receiverSocketId) => {
+    //     const peer = new RTCPeerConnection({
+    //         iceServers: [
+    //             { urls: "stun:stun.l.google.com:19302" }
+    //         ]
+    //     })
+
+    //     peer.onicecandidate = (event) => {
+    //         if (event.candidate) {
+    //             socket.emit("ice-candidate", {
+    //                 to: receiverSocketId,
+    //                 candidate: event.candidate,
+    //             })
+    //         }
+    //     }
+    //     peers[receiverSocketId] = peer
+    //     return peer
+    // }
+
+    const sendFile = (receiverSocketId) => {
+        const peer = new RTCPeerConnection({ 
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }] 
+        });
+        peers[receiverSocketId] = peer;
+    
+        const dataChannel = peer.createDataChannel("file-transfer");
+    
+        dataChannel.onopen = () => {
+            console.log(`✅ Data channel open with ${receiverSocketId}`);
+            sendFileChunks(dataChannel);
+        };
+    
+        dataChannel.onerror = (err) => {
+            console.error(`❌ DataChannel error:`, err);
+        };
+        peer.ondatachannel = (event) => {
+            const receiveChannel = event.channel;
+            receiveChannel.onopen = () => console.log("✅ Data channel open on receiver");
+            receiveChannel.onmessage = (event) => console.log("📩 Received data: ", event.data);
+            receiveChannel.onerror = (err) => console.error("❌ DataChannel error:", err);
+        };
+    
+        peer.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log("ice - sent through sender")
+                socket.emit("ice-candidate", {
+                    candidate: event.candidate,
+                    to: receiverSocketId,
+                });
+            }
+        };
+    
+        peer.createOffer()
+            .then(offer => peer.setLocalDescription(offer))
+            .then(() => {
+                console.log("sent offer")
+                socket.emit("offer", { to: receiverSocketId, offer: peer.localDescription });
+            });
+    };
+    
+
+    const sendFileChunks = (dataChannel) => {
+        console.log(fileRef.current)
+        if (!fileRef.current) return toast.error("No file selected")
+        const chunkSize = 16 * 1024 
+        const reader = new FileReader()
+        let offset = 0
+        reader.onload = (e) => {
+            dataChannel.send(e.target.result)
+            console.log("sending the files")
+            offset += e.target.result.byteLength
+            if (offset < fileRef.current.size) {
+                readSlice(offset)
+            } else {
+                dataChannel.send(new TextEncoder().encode("EFO")); 
+                dataChannel.close()
+                toast.success("File sent successfully!")
+            }
+        }
+        const readSlice = (o) => {
+            const slice = fileRef.current.slice(o, o + chunkSize)
+            reader.readAsArrayBuffer(slice)
+        }
+        readSlice(0)
+    }
     return (
         <div className="h-screen w-screen text-white flex flex-col">
             <Logo />
@@ -125,12 +278,12 @@ function App() {
                             ) : (
                                 <div className="w-full bg-white text-black p-5 rounded-lg shadow-md flex flex-col gap-4">
                                     <div className="flex justify-center">
-                                        <QRCode value={respone.qrUrl} size={180} />
+                                        <QRCode value={response.qrUrl} size={180} />
                                     </div>
                                     <div className="bg-gray-100 p-3 rounded border border-gray-400">
                                         <p className="text-sm font-medium mb-1">Share this link:</p>
                                         <div className="flex items-center justify-between">
-                                            <span className="truncate text-xs">{respone.url}</span>
+                                            <span className="truncate text-xs">{response.url}</span>
                                             <button
                                                 onClick={handleClickCopy}
                                                 className="bg-black text-white px-3 py-1 rounded text-xs"
@@ -150,7 +303,36 @@ function App() {
                         </>
                     )}
                 </div>
+                
             </div>
+                <div className="p-6">
+                    {connectedDevices.length > 0 ? (
+                        
+                        <div className="space-y-4">
+                            <h2 className="text-2xl font-bold mb-4 text-gray-800">Connected Devices</h2>
+                            {connectedDevices.map((device) => (
+                                <div
+                                    key={device.receiverSocketId}
+                                    className="bg-gray-900 text-white rounded-lg p-4 flex justify-between items-center shadow-md"
+                                >
+                                    <div>
+                                        <p className="text-lg font-semibold">{device.hostName}</p>
+                                        <p className={`text-sm font-medium ${device.status === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
+                                            Status: {device.status}
+                                        </p>
+                                    </div>
+                                    <div className="text-sm text-gray-400">
+                                        <p>Socket ID: <span className="font-mono">{device.receiverSocketId}</span></p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-gray-500 text-sm">No devices connected yet.</p>
+                    )}
+                </div>
+                :(<></>)
+            
         </div>
     )
 }
